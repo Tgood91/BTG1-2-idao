@@ -13,8 +13,8 @@ import "./IDAOBTG2.sol";
 /// @notice OpenZeppelin Governor-based voting contract. Voting power is the voter's
 /// token balance, boosted by their Bushido Virtue Score — the higher a wallet's
 /// combined virtue score, the more weight its vote carries, up to a capped bonus.
-/// @dev Deploys on Base. The voting token is WrappedRunesVotes (wRunes), the vote-tracking wrapper of Runes
-/// (0x68E63f682AB383A9132317349125fF7618C96e01). wRunes uses a timestamp clock, so the delay and voting period
+/// @dev Deploys on Base. The voting token is WrappedRunesVotes (WRunes), the vote-tracking wrapper of Runes
+/// (0x68E63f682AB383A9132317349125fF7618C96e01). WRunes uses a timestamp clock, so the delay and voting period
 /// below are in seconds. Governance can retune them later with setVotingDelay / setVotingPeriod.
 contract MyGovernance is
     Governor,
@@ -47,7 +47,7 @@ contract MyGovernance is
 
     error VirtueRegistryNotAContract(address registry);
 
-    /// @param _tokenStorage The deployed WrappedRunesVotes (wRunes) contract.
+    /// @param _tokenStorage The deployed WrappedRunesVotes (WRunes) contract.
     constructor(IVotes _tokenStorage, TimelockController _timelock, IDAOBTG2 _virtueRegistry)
         Governor("MyGovernance")
         GovernorSettings(INITIAL_VOTING_DELAY, INITIAL_VOTING_PERIOD, 0 /* anyone may propose */)

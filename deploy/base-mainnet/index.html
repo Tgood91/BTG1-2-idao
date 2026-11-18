@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTG Governance Deploy</title>
+<style>
+  :root { --bg:#0b0b10; --card:#15151d; --text:#e8e8ef; --muted:#9a9aab; --accent:#7c6cff; --ok:#4ade80; --warn:#fcd34d; --bad:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:4px 0 2px; } .sub { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .card { background:var(--card); border:1px solid #262633; border-radius:12px; padding:14px; margin-bottom:12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:8px 0 4px; }
+  input { width:100%; min-height:44px; padding:8px 10px; border-radius:10px; border:1px solid #3a3a4a; background:#0f0f15; color:var(--text); font:14px ui-monospace, Menlo, monospace; }
+  button { width:100%; min-height:44px; margin:6px 0; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; font-size:15px; }
+  button:disabled { background:#2b2b38; color:#77778a; }
+  .row { display:flex; justify-content:space-between; gap:8px; font-size:13px; color:var(--muted); overflow-wrap:anywhere; }
+  .row > span:first-child { flex:none; }
+  .warn { color:var(--warn); font-size:13px; } .ok { color:var(--ok); } .bad { color:var(--bad); }
+  #log { font:12px/1.5 ui-monospace, Menlo, monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; }
+  #checks div { font-size:13px; margin:4px 0; overflow-wrap:anywhere; }
+  a { color:#8ab4ff; }
+</style>
+</head>
+<body>
+<main>
+  <h1>BTG governance · Base mainnet deploy</h1>
+  <div class="sub">Deploys the real contracts: Wrapped Runes (WRunes, a 1:1 vote wrapper of Runes), the Virtue Audit Registry,
+    a timelock and MyGovernance (1 hour delay, 7 days voting, 4% quorum). Then it hands every admin role away from this
+    wallet. About 10 confirmations; costs well under $1 of ETH at normal Base gas prices.</div>
+  <div class="card">
+    <button id="connect">Connect wallet</button>
+    <div class="row"><span>Wallet</span><span id="who">not connected</span></div>
+    <div class="row"><span>Base ETH</span><span id="bal">—</span></div>
+  </div>
+  <div class="card">
+    <label for="admin">Registry owner (your Safe). It can grant and remove recorders, which decide virtue scores.</label>
+    <input id="admin" placeholder="0x…" autocomplete="off" spellcheck="false">
+    <label for="recorder">Recorder (optional): the service that will submit trade scores. Can be added later by the owner.</label>
+    <input id="recorder" placeholder="0x… or leave empty" autocomplete="off" spellcheck="false">
+    <label for="delay">Timelock delay, in hours (time between a vote passing and it taking effect)</label>
+    <input id="delay" type="number" inputmode="decimal" value="48" min="1" max="720">
+    <div class="warn" style="margin-top:8px">Check these before step 1: they are written into the contracts and roles.</div>
+  </div>
+  <div class="card">
+    <div id="confirmBox" style="display:none" class="warn"></div>
+    <button id="b1" disabled>1 · Deploy the four contracts</button>
+    <button id="b2" disabled>2 · Connect governance to the timelock</button>
+    <button id="b3" disabled>3 · Hand the registry to its owner</button>
+    <button id="b4" disabled>4 · Check everything on-chain</button>
+  </div>
+  <div class="card"><div id="addrs">Nothing deployed yet.</div><div id="checks"></div></div>
+  <div class="card"><div id="log"></div></div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<script type="module">
+import * as D from './deploy.js';
+const { ethers } = window;
+const CHAIN = { id: 8453, hex: '0x2105', name: 'Base', rpc: 'https://mainnet.base.org', explorer: 'https://basescan.org' };
+const $ = (id) => document.getElementById(id);
+const read = new ethers.JsonRpcProvider(CHAIN.rpc, CHAIN.id, { staticNetwork: true });
+D.setRead(read);
+let B = null, signer, me, st = {}, busy = false;
+const key = () => `btg-mainnet:${me}`;
+const save = () => { try { localStorage.setItem(key(), JSON.stringify(st)); } catch {} };
+const load = () => { try { st = JSON.parse(localStorage.getItem(key()) || '{}'); } catch { st = {}; } };
+const cfg = () => ({ admin: $('admin').value.trim(), recorder: $('recorder').value.trim(), delayHours: Number($('delay').value) });
+function log(m, cls) { const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = `${new Date().toLocaleTimeString()}  ${m}`; $('log').prepend(d); }
+function show() {
+  const rows = D.NAMES.filter((n) => st[n]).map((n) => `<div class="row"><span>${n}</span><a target="_blank" rel="noopener" href="${CHAIN.explorer}/address/${st[n]}">${st[n]}</a></div>`);
+  $('addrs').innerHTML = rows.join('') || 'Nothing deployed yet.';
+  const all = D.NAMES.every((n) => st[n]);
+  $('b1').disabled = busy || !me || all;
+  $('b2').disabled = busy || !all || st.wired;
+  $('b3').disabled = busy || !st.wired || st.handedOff;
+  $('b4').disabled = busy || !all;
+  for (const id of ['admin', 'recorder', 'delay']) $(id).disabled = !!st.WrappedRunesVotes; // settings are fixed once deploying starts
+}
+async function toBase() {
+  const cur = await window.ethereum.request({ method: 'eth_chainId' });
+  if (parseInt(cur, 16) === CHAIN.id) return;
+  await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN.hex }] });
+  if (parseInt(await window.ethereum.request({ method: 'eth_chainId' }), 16) !== CHAIN.id) throw new Error('the wallet is not on Base');
+}
+async function run(label, fn) {
+  if (busy) return; busy = true; show();
+  try { await toBase(); if ((await fn()) !== 'waiting') log(`${label}: done`, 'ok'); }
+  catch (e) { log(`${label} stopped: ${e.shortMessage || e.reason || e.message}`, 'bad'); }
+  finally { save(); busy = false; show(); $('bal').textContent = Number(ethers.formatEther(await read.getBalance(me))).toFixed(6); }
+}
+$('connect').onclick = async () => {
+  if (!window.ethereum) return log('No wallet found. Open this page in the browser inside your wallet app.', 'bad');
+  try {
+    B = B || Object.fromEntries(await Promise.all(D.NAMES.map(async (n) => [n, await (await fetch(`../../build/${n}.json`)).json()])));
+    await window.ethereum.request({ method: 'eth_requestAccounts' });
+    await toBase();
+    signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+    me = await signer.getAddress(); load();
+    if (st.cfg) { $('admin').value = st.cfg.admin; $('recorder').value = st.cfg.recorder; $('delay').value = st.cfg.delayHours; }
+    $('who').textContent = me; $('connect').textContent = 'Connected';
+    $('bal').textContent = Number(ethers.formatEther(await read.getBalance(me))).toFixed(6);
+    log(`Connected ${me} on Base`);
+    if (me.toLowerCase() === D.FAUCET_WALLET.toLowerCase()) log('This is the faucet wallet: deploying from it is blocked. Connect another wallet.', 'bad');
+    show();
+  } catch (e) { log('Connect failed: ' + (e.shortMessage || e.message), 'bad'); }
+};
+// Two taps, on the page itself: some wallet browsers block confirm() pop-ups (they return "cancel" at once).
+let pending = null;
+const resetConfirm = () => { pending = null; $('confirmBox').style.display = 'none'; $('b1').textContent = '1 · Deploy the four contracts'; };
+for (const id of ['admin', 'recorder', 'delay']) $(id).addEventListener('input', resetConfirm);
+$('b1').onclick = () => run('Deploy', async () => {
+  if (!st.cfg) {
+    const c = cfg();
+    await D.preflight(ethers, me, c);
+    const same = pending && JSON.stringify(pending) === JSON.stringify(c);
+    if (!same) {
+      pending = c;
+      $('confirmBox').innerHTML = `Deploy to <b>Base mainnet</b> from ${me}<br>Registry owner: ${c.admin}<br>Recorder: ${c.recorder || '(none yet)'}<br>Timelock delay: ${c.delayHours} h<br>These are written into the contracts. Tap the button again to deploy.`;
+      $('confirmBox').style.display = 'block';
+      $('b1').textContent = 'Confirm: deploy to Base mainnet';
+      log('Check the settings shown above the button, then tap "Confirm" to deploy.');
+      return 'waiting';
+    }
+    st.cfg = c; save(); resetConfirm();
+  }
+  await D.preflight(ethers, me, st.cfg);
+  await D.deploy(ethers, B, signer, st, st.cfg, (m) => { log(m); save(); show(); });
+});
+$('b2').onclick = () => run('Timelock', async () => { await D.wireTimelock(ethers, B, signer, st, log); st.wired = true; });
+$('b3').onclick = () => run('Registry hand-off', async () => { await D.handOffRegistry(ethers, B, signer, st, st.cfg, log); st.handedOff = true; });
+$('b4').onclick = () => run('Checks', async () => {
+  const rows = await D.verify(ethers, B, st, st.cfg, me);
+  $('checks').innerHTML = rows.map(([l, ok, d]) => `<div class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${l}: ${d}</div>`).join('');
+  if (rows.some((r) => !r[1])) throw new Error('some checks failed (see the list)');
+});
+show();
+</script>
+</body>
+</html>
