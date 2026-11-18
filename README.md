@@ -78,17 +78,16 @@ What this is built with
 Solidity 0.8.20, used consistently across all files
 OpenZeppelin's governance toolkit (Governor + extensions) — a widely-used, security-audited set of building blocks for DAOs, rather than writing voting logic from scratch
 OpenZeppelin's AccessControl — powers the recorder-role permission system in the Virtue Audit Registry
-A governance token that tracks voting history (so past balances can be checked fairly): wRunes (WrappedRunesVotes), a 1:1 wrapper of Runes on Base (0x68E63f682AB383A9132317349125fF7618C96e01). Runes itself doesn't track votes, so holders deposit Runes to get wRunes, delegate them (to themselves or someone else) to activate their votes, and can swap back to Runes at any time
+A governance token that tracks voting history (so past balances can be checked fairly): WRunes (WrappedRunesVotes, token name "Wrapped Runes"), a 1:1 wrapper of Runes on Base (0x68E63f682AB383A9132317349125fF7618C96e01). Runes itself doesn't track votes, so holders deposit Runes to get WRunes, delegate them (to themselves or someone else) to activate their votes, and can swap back to Runes at any time
 A timelock — the mechanism behind the safety delay mentioned above
 Compiled contracts
 build/ holds the ABI and bytecode for WrappedRunesVotes, VirtueAuditRegistry, MyGovernance and OpenZeppelin's TimelockController, ready to deploy on Base. They were compiled with solc 0.8.24, OpenZeppelin Contracts 5.1.0, optimizer on (200 runs), EVM version cancun and viaIR on (VirtueAuditRegistry's recordTrade has too many parameters for the default pipeline). Use the same settings when verifying on an explorer.
 Deployment order (all on Base)
-Deploy WrappedRunesVotes (no constructor arguments; it is fixed to Runes)
-Deploy the Virtue Audit Registry, with your admin wallet address
-Grant the recorder role to whichever service will be submitting trade scores
-Deploy a TimelockController (minimum delay of your choice, e.g. 2 days; proposers and executors set after MyGovernance exists)
-Deploy MyGovernance with the wRunes address, the timelock address and the registry address
-Give MyGovernance the timelock's proposer and canceller roles, let anyone execute (executor = zero address), then renounce the deployer's timelock admin role
+The easiest way is deploy/base-mainnet/index.html, opened in your wallet's browser at https://raw.githack.com/Tgood91/BTG1-2-idao/main/deploy/base-mainnet/index.html. It deploys the real contracts from build/ (nothing marked mock or test) and leaves the deploying wallet with no admin role. It refuses the faucet wallet (its key lives on a server) and refuses a registry owner equal to the deploying wallet. Steps:
+1. Deploy WrappedRunesVotes (WRunes, no constructor arguments; it is fixed to Runes), the Virtue Audit Registry, a TimelockController (delay of your choice, 48 hours by default) and MyGovernance (WRunes, timelock, registry)
+2. Give MyGovernance the timelock's proposer and canceller roles (anyone may execute), then the deploying wallet renounces its timelock admin role, so only governance can change the timelock
+3. Grant the registry's admin role to its owner (a Safe) and the recorder role to the scoring service, then the deploying wallet renounces both registry roles
+4. Read everything back and show a checklist
 Testing on a testnet (Monad testnet by default)
 test/ holds testnet-only contracts: MockRunes (tRUNES, a free-mint stand-in for Runes), WrappedRunesVotesTest (the vote wrapper, token name "Test Wrapped Runes", symbol TWRunes, pointed at MockRunes) and MyGovernanceTest (MyGovernance with a 60 s voting delay and 5 min voting). test/testnet/index.html deploys them with your own wallet and runs one proposal end to end: deploy, wrap and delegate, record a scored trade, check votes (token votes plus the virtue bonus), propose, vote, queue, execute. Your wallet only signs and sends; gas, reads and confirmations go through the chain's public RPC. Open https://raw.githack.com/Tgood91/BTG1-2-idao/main/test/testnet/index.html in your wallet's browser (Monad testnet, chain 10143), or add ?chain=base-sepolia for Base Sepolia. Never deploy the test contracts to mainnet.
 License

@@ -7,10 +7,10 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Wrapper.sol";
 import "@openzeppelin/contracts/utils/Nonces.sol";
 
-/// @title WrappedRunesVotes (wRunes)
+/// @title WrappedRunesVotes (WRunes)
 /// @notice The BTG governance token. Runes (a plain ERC-20 on Base) does not track votes, so holders deposit Runes
-/// here 1:1 to get wRunes, which do. wRunes can be turned back into Runes at any time (withdrawTo).
-/// To vote, a holder must delegate their wRunes (to themselves or someone else) with `delegate`.
+/// here 1:1 to get WRunes, which do. WRunes can be turned back into Runes at any time (withdrawTo).
+/// To vote, a holder must delegate their WRunes (to themselves or someone else) with `delegate`.
 /// @dev Uses a timestamp clock (ERC-6372 "mode=timestamp"), so MyGovernance's delay and voting period are seconds
 /// and do not depend on block speed. Runes takes no fee on transfer (checked in its verified source on Basescan),
 /// which a 1:1 wrapper requires.
@@ -19,8 +19,8 @@ contract WrappedRunesVotes is ERC20, ERC20Permit, ERC20Votes, ERC20Wrapper {
     address public constant RUNES = 0x68E63f682AB383A9132317349125fF7618C96e01;
 
     constructor()
-        ERC20("Wrapped Runes Votes", "wRunes")
-        ERC20Permit("Wrapped Runes Votes")
+        ERC20("Wrapped Runes", "WRunes")
+        ERC20Permit("Wrapped Runes")
         ERC20Wrapper(IERC20(RUNES))
     {}
 
