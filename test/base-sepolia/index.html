@@ -53,6 +53,7 @@ const { ethers } = window;
 const CHAIN = { id: 84532, hex: '0x14a34', name: 'Base Sepolia', rpc: 'https://sepolia.base.org', explorer: 'https://sepolia.basescan.org' };
 const $ = (id) => document.getElementById(id);
 const read = new ethers.JsonRpcProvider(CHAIN.rpc, CHAIN.id, { staticNetwork: true }); // reads never depend on the wallet
+F.setRead(read); // gas estimates and confirmations too: the wallet only signs and sends
 let C, signer, me, st = {};
 const key = () => `btg-test:${CHAIN.id}:${me}`;
 const save = () => { try { localStorage.setItem(key(), JSON.stringify(st)); } catch {} };
