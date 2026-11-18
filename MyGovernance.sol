@@ -13,10 +13,9 @@ import "./IDAOBTG2.sol";
 /// @notice OpenZeppelin Governor-based voting contract. Voting power is the voter's
 /// token balance, boosted by their Bushido Virtue Score — the higher a wallet's
 /// combined virtue score, the more weight its vote carries, up to a capped bonus.
-/// @dev Timings are in blocks of the governance token's clock and sized for Monad (about 0.31 s per block,
-/// measured over 1M blocks in Nov 2026). Governance can retune them later with setVotingDelay / setVotingPeriod.
-/// If the token uses a timestamp clock (ERC-6372 "mode=timestamp"), these numbers are seconds instead and must be
-/// changed before deploying.
+/// @dev Deploys on Base. The voting token is WrappedRunesVotes (wRunes), the vote-tracking wrapper of Runes
+/// (0x68E63f682AB383A9132317349125fF7618C96e01). wRunes uses a timestamp clock, so the delay and voting period
+/// below are in seconds. Governance can retune them later with setVotingDelay / setVotingPeriod.
 contract MyGovernance is
     Governor,
     GovernorSettings,
@@ -36,11 +35,11 @@ contract MyGovernance is
     /// account's virtue score can dominate a vote outright.
     uint256 public constant MAX_VIRTUE_BONUS_BP = 10_000; // 10,000 basis points = 100%
 
-    /// @notice About 1 hour of Monad blocks between a proposal and the start of voting.
-    uint48 public constant INITIAL_VOTING_DELAY = 11_760;
+    /// @notice 1 hour between a proposal and the start of voting (seconds: the token's clock is timestamps).
+    uint48 public constant INITIAL_VOTING_DELAY = 1 hours;
 
-    /// @notice About 7 days of Monad blocks of voting (604,800 s / ~0.306 s per block).
-    uint32 public constant INITIAL_VOTING_PERIOD = 1_976_000;
+    /// @notice 7 days of voting.
+    uint32 public constant INITIAL_VOTING_PERIOD = 7 days;
 
     /// @notice 4% of the token supply (at the proposal's snapshot) must vote For or Abstain for a result to count.
     /// Note: votes include the virtue bonus, so quorum can be reached with less than 4% of the supply in tokens.
@@ -48,6 +47,7 @@ contract MyGovernance is
 
     error VirtueRegistryNotAContract(address registry);
 
+    /// @param _tokenStorage The deployed WrappedRunesVotes (wRunes) contract.
     constructor(IVotes _tokenStorage, TimelockController _timelock, IDAOBTG2 _virtueRegistry)
         Governor("MyGovernance")
         GovernorSettings(INITIAL_VOTING_DELAY, INITIAL_VOTING_PERIOD, 0 /* anyone may propose */)
