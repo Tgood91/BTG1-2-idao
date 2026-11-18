@@ -23,13 +23,13 @@
 </head>
 <body>
 <main>
-  <h1>BTG governance test · Base Sepolia</h1>
-  <div class="sub">Testnet only. Deploys a test Runes token, its vote wrapper, the virtue registry, a timelock and MyGovernance
+  <h1>BTG governance test · <span id="netname">Monad testnet</span></h1>
+  <div class="sub">Testnet only. Deploys a test Runes token (tRUNES), its vote wrapper (TWRunes), the virtue registry, a timelock and MyGovernance
     (60 s voting delay, 5 min voting, 60 s timelock), then runs one proposal end to end. About 13 wallet confirmations and 8 minutes.</div>
   <div class="card">
     <button id="connect">Connect wallet</button>
     <div class="row"><span>Wallet</span><span id="who">not connected</span></div>
-    <div class="row"><span>Base Sepolia ETH</span><span id="bal">—</span></div>
+    <div class="row"><span id="balname">Balance</span><span id="bal">—</span></div>
   </div>
   <div class="card">
     <button id="b1" disabled>1 · Deploy contracts</button>
@@ -50,26 +50,33 @@
 <script type="module">
 import * as F from './flow.js';
 const { ethers } = window;
-const CHAIN = { id: 84532, hex: '0x14a34', name: 'Base Sepolia', rpc: 'https://sepolia.base.org', explorer: 'https://sepolia.basescan.org' };
+// Monad testnet by default; ?chain=base-sepolia for Base Sepolia.
+const CHAINS = {
+  'monad-testnet': { id: 10143, hex: '0x279f', name: 'Monad testnet', rpc: 'https://testnet-rpc.monad.xyz', explorer: 'https://testnet.monadexplorer.com', coin: 'MON' },
+  'base-sepolia': { id: 84532, hex: '0x14a34', name: 'Base Sepolia', rpc: 'https://sepolia.base.org', explorer: 'https://sepolia.basescan.org', coin: 'ETH' },
+};
+const CHAIN = CHAINS[new URLSearchParams(location.search).get('chain')] || CHAINS['monad-testnet'];
+document.getElementById('netname').textContent = CHAIN.name;
+document.getElementById('balname').textContent = `${CHAIN.name} ${CHAIN.coin}`;
 const $ = (id) => document.getElementById(id);
 const read = new ethers.JsonRpcProvider(CHAIN.rpc, CHAIN.id, { staticNetwork: true }); // reads never depend on the wallet
 F.setRead(read); // gas estimates and confirmations too: the wallet only signs and sends
 let C, signer, me, st = {};
-const key = () => `btg-test:${CHAIN.id}:${me}`;
+const key = () => `btg-test:${CHAIN.id}:${me}`; // saved progress is per chain and per wallet
 const save = () => { try { localStorage.setItem(key(), JSON.stringify(st)); } catch {} };
 const load = () => { try { st = JSON.parse(localStorage.getItem(key()) || '{}'); } catch { st = {}; } };
 function log(m, cls) { const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = `${new Date().toLocaleTimeString()}  ${m}`; $('log').prepend(d); }
 function showAddrs() {
-  const names = { runes: 'MockRunes (tRUNES)', wrap: 'WrappedRunesVotesTest (wtRUNES)', registry: 'VirtueAuditRegistry', timelock: 'TimelockController', gov: 'MyGovernanceTest' };
+  const names = { runes: 'MockRunes (tRUNES)', wrap: 'WrappedRunesVotesTest (TWRunes)', registry: 'VirtueAuditRegistry', timelock: 'TimelockController', gov: 'MyGovernanceTest' };
   $('addrs').innerHTML = Object.entries(names).filter(([k]) => st[k]).map(([k, n]) => `<div>${n}: <a target="_blank" rel="noopener" href="${CHAIN.explorer}/address/${st[k]}">${st[k]}</a></div>`).join('') || 'Nothing deployed yet.';
 }
-async function toBaseSepolia() {
+async function toTestnet() {
   const cur = await window.ethereum.request({ method: 'eth_chainId' });
   if (parseInt(cur, 16) === CHAIN.id) return;
   try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN.hex }] }); }
   catch (e) {
     if (e.code !== 4902 && !/unrecognized|not added|4902/i.test(String(e.message))) throw e;
-    await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: CHAIN.hex, chainName: CHAIN.name, rpcUrls: [CHAIN.rpc], blockExplorerUrls: [CHAIN.explorer], nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 } }] });
+    await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: CHAIN.hex, chainName: CHAIN.name, rpcUrls: [CHAIN.rpc], blockExplorerUrls: [CHAIN.explorer], nativeCurrency: { name: CHAIN.coin, symbol: CHAIN.coin, decimals: 18 } }] });
   }
 }
 async function refresh() {
@@ -94,7 +101,7 @@ async function refresh() {
 let busy = false;
 async function run(label, fn) {
   if (busy) return; busy = true; await refresh().catch(() => {});
-  try { await toBaseSepolia(); await fn(); log(`${label}: done`, 'ok'); }
+  try { await toTestnet(); await fn(); log(`${label}: done`, 'ok'); }
   catch (e) { log(`${label} failed: ${e.shortMessage || e.reason || e.message}`, 'bad'); }
   finally { save(); busy = false; await refresh().catch(() => {}); }
 }
@@ -103,12 +110,12 @@ $('connect').onclick = async () => {
   try {
     C = C || (await (await fetch('./contracts.json')).json()).contracts;
     await window.ethereum.request({ method: 'eth_requestAccounts' });
-    await toBaseSepolia();
+    await toTestnet();
     signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
     me = await signer.getAddress(); load();
     $('who').textContent = me; $('connect').textContent = 'Connected';
-    log(`Connected ${me} on Base Sepolia`);
-    if (Number(ethers.formatEther(await read.getBalance(me))) < 0.002) log('This wallet has under 0.002 Base Sepolia ETH: get some from a Base Sepolia faucet first.', 'bad');
+    log(`Connected ${me} on ${CHAIN.name}`);
+    if (Number(ethers.formatEther(await read.getBalance(me))) < 0.05) log(`This wallet has under 0.05 ${CHAIN.coin} on ${CHAIN.name}: get some from a faucet first.`, 'bad');
     await refresh();
   } catch (e) { log('Connect failed: ' + (e.shortMessage || e.message), 'bad'); }
 };

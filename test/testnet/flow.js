@@ -1,4 +1,4 @@
-// The Base Sepolia test, step by step. Used by index.html (your wallet signs) and by the local dry run.
+// The testnet governance test (Monad testnet or Base Sepolia), step by step. Used by index.html (your wallet signs) and by the local dry run.
 // Each step reads/writes `st` (saved addresses and the proposal), so the page can resume after a reload.
 export const TEST = { wrapAmount: '100000', trade: [1000, 1000, 1000, 1000, 1000] }; // 5 virtues x 10.00 = 5000 points
 
@@ -22,7 +22,7 @@ async function send(ethers, signer, req, log) {
   if (fee.maxFeePerGas) Object.assign(tx, { maxFeePerGas: fee.maxFeePerGas * 2n, maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? 1n });
   log?.('  confirm it in your wallet…');
   const hash = await signer.sendUncheckedTransaction(tx);
-  log?.(`  sent ${hash.slice(0, 14)}…, waiting for Base Sepolia`);
+  log?.(`  sent ${hash.slice(0, 14)}…, waiting for the chain`);
   let rc = null;
   for (let i = 0; i < 90 && !rc; i++) { // check the receipt every 2 s for up to 3 minutes
     rc = await rp.getTransactionReceipt(hash).catch(() => null);
@@ -76,7 +76,7 @@ export async function wrapDelegateScore(ethers, C, signer, st, log) {
   if ((await wrap.balanceOf(me)) < amt) {
     log(`Approving ${TEST.wrapAmount} tRUNES…`);
     await send(ethers, signer, callTx(ethers, C, 'MockRunes', st.runes, 'approve', [st.wrap, amt]), log);
-    log('Wrapping into wtRUNES…');
+    log('Wrapping into TWRunes…');
     await send(ethers, signer, callTx(ethers, C, 'WrappedRunesVotesTest', st.wrap, 'depositFor', [me, amt]), log);
   }
   if ((await wrap.delegates(me)) !== me) {

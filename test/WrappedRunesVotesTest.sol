@@ -12,8 +12,8 @@ import "@openzeppelin/contracts/utils/Nonces.sol";
 /// being fixed to the real Runes address. Keep the two in step.
 contract WrappedRunesVotesTest is ERC20, ERC20Permit, ERC20Votes, ERC20Wrapper {
     constructor(IERC20 underlying)
-        ERC20("Wrapped Test Runes Votes", "wtRUNES")
-        ERC20Permit("Wrapped Test Runes Votes")
+        ERC20("Test Wrapped Runes", "TWRunes")
+        ERC20Permit("Test Wrapped Runes")
         ERC20Wrapper(underlying)
     {}
 
