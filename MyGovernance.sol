@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/governance/Governor.sol";
 import "@openzeppelin/contracts/governance/extensions/GovernorSettings.sol";
 import "@openzeppelin/contracts/governance/extensions/GovernorCountingSimple.sol";
 import "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
+import "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
 import "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
 import "./IDAOBTG2.sol";
 
@@ -12,7 +13,17 @@ import "./IDAOBTG2.sol";
 /// @notice OpenZeppelin Governor-based voting contract. Voting power is the voter's
 /// token balance, boosted by their Bushido Virtue Score — the higher a wallet's
 /// combined virtue score, the more weight its vote carries, up to a capped bonus.
-contract MyGovernance is Governor, GovernorSettings, GovernorCountingSimple, GovernorVotes, GovernorTimelockControl {
+/// @dev Deploys on Base. The voting token is WrappedRunesVotes (wRunes), the vote-tracking wrapper of Runes
+/// (0x68E63f682AB383A9132317349125fF7618C96e01). wRunes uses a timestamp clock, so the delay and voting period
+/// below are in seconds. Governance can retune them later with setVotingDelay / setVotingPeriod.
+contract MyGovernance is
+    Governor,
+    GovernorSettings,
+    GovernorCountingSimple,
+    GovernorVotes,
+    GovernorVotesQuorumFraction,
+    GovernorTimelockControl
+{
     /// @notice The contract holding each account's Bushido Virtue Score.
     IDAOBTG2 public immutable virtueRegistry;
 
@@ -24,18 +35,39 @@ contract MyGovernance is Governor, GovernorSettings, GovernorCountingSimple, Gov
     /// account's virtue score can dominate a vote outright.
     uint256 public constant MAX_VIRTUE_BONUS_BP = 10_000; // 10,000 basis points = 100%
 
+    /// @notice 1 hour between a proposal and the start of voting (seconds: the token's clock is timestamps).
+    uint48 public constant INITIAL_VOTING_DELAY = 1 hours;
+
+    /// @notice 7 days of voting.
+    uint32 public constant INITIAL_VOTING_PERIOD = 7 days;
+
+    /// @notice 4% of the token supply (at the proposal's snapshot) must vote For or Abstain for a result to count.
+    /// Note: votes include the virtue bonus, so quorum can be reached with less than 4% of the supply in tokens.
+    uint256 public constant INITIAL_QUORUM_PERCENT = 4;
+
+    error VirtueRegistryNotAContract(address registry);
+
+    /// @param _tokenStorage The deployed WrappedRunesVotes (wRunes) contract.
     constructor(IVotes _tokenStorage, TimelockController _timelock, IDAOBTG2 _virtueRegistry)
         Governor("MyGovernance")
-        GovernorSettings(1 /* 1 block voting delay */, 5040 /* 1 week voting period */, 0 /* 0 proposal threshold */)
+        GovernorSettings(INITIAL_VOTING_DELAY, INITIAL_VOTING_PERIOD, 0 /* anyone may propose */)
         GovernorVotes(_tokenStorage)
+        GovernorVotesQuorumFraction(INITIAL_QUORUM_PERCENT)
         GovernorTimelockControl(_timelock)
     {
+        // A registry with no code would make every vote revert (the score call cannot be caught), so refuse it here.
+        if (address(_virtueRegistry).code.length == 0) revert VirtueRegistryNotAContract(address(_virtueRegistry));
         virtueRegistry = _virtueRegistry;
     }
 
     /// @dev Reads the base token-weighted vote count, then adds a bonus based on the
     /// voter's Bushido Virtue Score. Accounts with zero token votes get no bonus,
     /// since a virtue score alone shouldn't grant voting power.
+    /// If the registry call fails, the voter simply gets no bonus: a broken or paused registry must never stop
+    /// people voting with their tokens.
+    /// Known limit: the registry keeps only current totals, so the bonus uses the score at the moment of voting,
+    /// not at the proposal's snapshot. A score that changes during a vote changes the bonus of later votes. Fixing
+    /// that needs the registry to keep score history (checkpoints).
     function _getVotes(address account, uint256 timepoint, bytes memory params)
         internal
         view
@@ -48,7 +80,12 @@ contract MyGovernance is Governor, GovernorSettings, GovernorCountingSimple, Gov
             return 0;
         }
 
-        IDAOBTG2.BushidoVirtueScore memory scores = virtueRegistry.getBushidoVirtueScore(account);
+        IDAOBTG2.BushidoVirtueScore memory scores;
+        try virtueRegistry.getBushidoVirtueScore(account) returns (IDAOBTG2.BushidoVirtueScore memory s) {
+            scores = s;
+        } catch {
+            return baseVotes;
+        }
 
         uint256 totalVirtue = uint256(scores.righteousness)
             + scores.courage
@@ -81,6 +118,10 @@ contract MyGovernance is Governor, GovernorSettings, GovernorCountingSimple, Gov
 
     function proposalThreshold() public view override(Governor, GovernorSettings) returns (uint256) {
         return super.proposalThreshold();
+    }
+
+    function quorum(uint256 timepoint) public view override(Governor, GovernorVotesQuorumFraction) returns (uint256) {
+        return super.quorum(timepoint);
     }
 
     function state(uint256 proposalId)

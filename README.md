@@ -50,8 +50,9 @@ Honesty (Makoto)
 The other three virtues aren't trade-related — they're set separately, for example based on governance participation. Anyone can look up a wallet's full trade history and score breakdown; nothing here is hidden.
 MyGovernance — the voting engine
 Where actual votes happen. Built from a well-established, widely-used open-source voting toolkit (OpenZeppelin), configured like this:
-A short delay after a proposal is submitted before voting opens
-About a week-long voting window
+A short delay (about an hour) after a proposal is submitted before voting opens
+A 7-day voting window (timed in seconds, so block speed doesn't matter)
+A 4% quorum: at least 4% of the token supply must take part for a result to count
 No minimum token holding required to submit a proposal
 A safety delay after a vote passes, before the change can actually go into effect — giving the community a window to notice and react
 How a trade turns into voting power
@@ -77,11 +78,18 @@ What this is built with
 Solidity 0.8.20, used consistently across all files
 OpenZeppelin's governance toolkit (Governor + extensions) — a widely-used, security-audited set of building blocks for DAOs, rather than writing voting logic from scratch
 OpenZeppelin's AccessControl — powers the recorder-role permission system in the Virtue Audit Registry
-A governance token that tracks voting history (so past balances can be checked fairly)
+A governance token that tracks voting history (so past balances can be checked fairly): wRunes (WrappedRunesVotes), a 1:1 wrapper of Runes on Base (0x68E63f682AB383A9132317349125fF7618C96e01). Runes itself doesn't track votes, so holders deposit Runes to get wRunes, delegate them (to themselves or someone else) to activate their votes, and can swap back to Runes at any time
 A timelock — the mechanism behind the safety delay mentioned above
-Deployment order
-Deploy the Virtue Audit Registry first, with your admin wallet address
+Compiled contracts
+build/ holds the ABI and bytecode for WrappedRunesVotes, VirtueAuditRegistry, MyGovernance and OpenZeppelin's TimelockController, ready to deploy on Base. They were compiled with solc 0.8.24, OpenZeppelin Contracts 5.1.0, optimizer on (200 runs), EVM version cancun and viaIR on (VirtueAuditRegistry's recordTrade has too many parameters for the default pipeline). Use the same settings when verifying on an explorer.
+Deployment order (all on Base)
+Deploy WrappedRunesVotes (no constructor arguments; it is fixed to Runes)
+Deploy the Virtue Audit Registry, with your admin wallet address
 Grant the recorder role to whichever service will be submitting trade scores
-Deploy MyGovernance, passing the registry's address in as its virtue source
+Deploy a TimelockController (minimum delay of your choice, e.g. 2 days; proposers and executors set after MyGovernance exists)
+Deploy MyGovernance with the wRunes address, the timelock address and the registry address
+Give MyGovernance the timelock's proposer and canceller roles, let anyone execute (executor = zero address), then renounce the deployer's timelock admin role
+Testing on a testnet (Monad testnet by default)
+test/ holds testnet-only contracts: MockRunes (tRUNES, a free-mint stand-in for Runes), WrappedRunesVotesTest (the vote wrapper, token name "Test Wrapped Runes", symbol TWRunes, pointed at MockRunes) and MyGovernanceTest (MyGovernance with a 60 s voting delay and 5 min voting). test/testnet/index.html deploys them with your own wallet and runs one proposal end to end: deploy, wrap and delegate, record a scored trade, check votes (token votes plus the virtue bonus), propose, vote, queue, execute. Your wallet only signs and sends; gas, reads and confirmations go through the chain's public RPC. Open https://raw.githack.com/Tgood91/BTG1-2-idao/main/test/testnet/index.html in your wallet's browser (Monad testnet, chain 10143), or add ?chain=base-sepolia for Base Sepolia. Never deploy the test contracts to mainnet.
 License
 BTG1 and BTG2 carry an AGPL-3.0-or-later license, inherited from the Aragon framework they're adapted from. MyGovernance and the Virtue Audit Registry are MIT licensed. Worth double-checking license compatibility before combining these with other code in the repo.On-chain governance for BTG. Voting power blends token balance with a Bushido Virtue Score earned from real trading activity across 8 virtues — trade well, gain more say.
