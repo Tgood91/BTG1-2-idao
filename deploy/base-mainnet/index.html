@@ -44,6 +44,7 @@
     <div class="warn" style="margin-top:8px">Check these before step 1: they are written into the contracts and roles.</div>
   </div>
   <div class="card">
+    <div id="confirmBox" style="display:none" class="warn"></div>
     <button id="b1" disabled>1 · Deploy the four contracts</button>
     <button id="b2" disabled>2 · Connect governance to the timelock</button>
     <button id="b3" disabled>3 · Hand the registry to its owner</button>
@@ -84,7 +85,7 @@ async function toBase() {
 }
 async function run(label, fn) {
   if (busy) return; busy = true; show();
-  try { await toBase(); await fn(); log(`${label}: done`, 'ok'); }
+  try { await toBase(); if ((await fn()) !== 'waiting') log(`${label}: done`, 'ok'); }
   catch (e) { log(`${label} stopped: ${e.shortMessage || e.reason || e.message}`, 'bad'); }
   finally { save(); busy = false; show(); $('bal').textContent = Number(ethers.formatEther(await read.getBalance(me))).toFixed(6); }
 }
@@ -104,14 +105,26 @@ $('connect').onclick = async () => {
     show();
   } catch (e) { log('Connect failed: ' + (e.shortMessage || e.message), 'bad'); }
 };
+// Two taps, on the page itself: some wallet browsers block confirm() pop-ups (they return "cancel" at once).
+let pending = null;
+const resetConfirm = () => { pending = null; $('confirmBox').style.display = 'none'; $('b1').textContent = '1 · Deploy the four contracts'; };
+for (const id of ['admin', 'recorder', 'delay']) $(id).addEventListener('input', resetConfirm);
 $('b1').onclick = () => run('Deploy', async () => {
-  const c = st.cfg || cfg();
-  await D.preflight(ethers, me, c);
   if (!st.cfg) {
-    const msg = `Deploy to Base MAINNET from ${me}?\n\nRegistry owner: ${c.admin}\nRecorder: ${c.recorder || '(none yet)'}\nTimelock delay: ${c.delayHours} h\n\nThese are written into the contracts.`;
-    if (!confirm(msg)) throw new Error('cancelled');
-    st.cfg = c; save();
+    const c = cfg();
+    await D.preflight(ethers, me, c);
+    const same = pending && JSON.stringify(pending) === JSON.stringify(c);
+    if (!same) {
+      pending = c;
+      $('confirmBox').innerHTML = `Deploy to <b>Base mainnet</b> from ${me}<br>Registry owner: ${c.admin}<br>Recorder: ${c.recorder || '(none yet)'}<br>Timelock delay: ${c.delayHours} h<br>These are written into the contracts. Tap the button again to deploy.`;
+      $('confirmBox').style.display = 'block';
+      $('b1').textContent = 'Confirm: deploy to Base mainnet';
+      log('Check the settings shown above the button, then tap "Confirm" to deploy.');
+      return 'waiting';
+    }
+    st.cfg = c; save(); resetConfirm();
   }
+  await D.preflight(ethers, me, st.cfg);
   await D.deploy(ethers, B, signer, st, st.cfg, (m) => { log(m); save(); show(); });
 });
 $('b2').onclick = () => run('Timelock', async () => { await D.wireTimelock(ethers, B, signer, st, log); st.wired = true; });
