@@ -80,6 +80,8 @@ OpenZeppelin's governance toolkit (Governor + extensions) — a widely-used, sec
 OpenZeppelin's AccessControl — powers the recorder-role permission system in the Virtue Audit Registry
 A governance token that tracks voting history (so past balances can be checked fairly)
 A timelock — the mechanism behind the safety delay mentioned above
+Compiled contracts
+build/ holds the ABI and bytecode for VirtueAuditRegistry, MyGovernance and OpenZeppelin's TimelockController, ready to deploy. They were compiled with solc 0.8.24, OpenZeppelin Contracts 5.1.0, optimizer on (200 runs), EVM version cancun and viaIR on (VirtueAuditRegistry's recordTrade has too many parameters for the default pipeline). Use the same settings when verifying on an explorer. The governance token (an ERC20Votes token) is not in this repo.
 Deployment order
 Deploy the Virtue Audit Registry first, with your admin wallet address
 Grant the recorder role to whichever service will be submitting trade scores
