@@ -50,8 +50,9 @@ Honesty (Makoto)
 The other three virtues aren't trade-related — they're set separately, for example based on governance participation. Anyone can look up a wallet's full trade history and score breakdown; nothing here is hidden.
 MyGovernance — the voting engine
 Where actual votes happen. Built from a well-established, widely-used open-source voting toolkit (OpenZeppelin), configured like this:
-A short delay after a proposal is submitted before voting opens
-About a week-long voting window
+A short delay (about an hour) after a proposal is submitted before voting opens
+About a week-long voting window (timed in Monad blocks)
+A 4% quorum: at least 4% of the token supply must take part for a result to count
 No minimum token holding required to submit a proposal
 A safety delay after a vote passes, before the change can actually go into effect — giving the community a window to notice and react
 How a trade turns into voting power
