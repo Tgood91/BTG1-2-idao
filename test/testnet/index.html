@@ -39,6 +39,7 @@
     <button id="b5" disabled>5 · Vote For</button>
     <button id="b6" disabled>6 · Queue in timelock</button>
     <button id="b7" disabled>7 · Execute</button>
+    <button id="again" disabled>Run another proposal (same contracts, back to step 4)</button>
     <div class="row"><span>Proposal</span><span id="pstate" class="state">—</span></div>
     <div class="row"><span>Next step opens</span><span id="pwait">—</span></div>
   </div>
@@ -95,7 +96,8 @@ async function refresh() {
   }
   $('pstate').textContent = state; $('pwait').textContent = wait;
   const ready = { b1: !st.deployed, b2: st.deployed && !st.scored, b3: st.scored, b4: st.scored && !st.proposalId,
-    b5: state === 'Active' && !st.voted, b6: state === 'Succeeded', b7: state === 'Queued' && /now/.test(wait) };
+    b5: state === 'Active' && !st.voted, b6: state === 'Succeeded', b7: state === 'Queued' && /now/.test(wait),
+    again: ['Executed', 'Defeated', 'Canceled', 'Expired'].includes(state) };
   for (const [b, on] of Object.entries(ready)) $(b).disabled = !on || busy;
 }
 let busy = false;
@@ -126,7 +128,15 @@ $('b4').onclick = () => run('Proposal', () => F.propose(ethers, C, signer, st, l
 $('b5').onclick = () => run('Vote', async () => { await F.voteFor(ethers, C, signer, st, log); st.voted = true; });
 $('b6').onclick = () => run('Queue', () => F.queue(ethers, C, signer, st, log));
 $('b7').onclick = () => run('Execute', () => F.execute(ethers, C, signer, st, log));
-$('reset').onclick = () => { if (!confirm('Forget the saved test addresses and start again?')) return; st = {}; save(); $('log').innerHTML = ''; refresh(); };
+// Same contracts, a new proposal (a new description gives it a new id). Votes stay delegated, so it starts at step 4.
+$('again').onclick = () => { for (const k of ['proposalNonce', 'proposalId', 'voted', 'executed']) delete st[k]; save(); log('Ready for a new proposal: tap 4 · Submit test proposal.'); refresh(); };
+// Two taps on the page: some wallet browsers block confirm() pop-ups.
+let resetArmed = false;
+$('reset').onclick = () => {
+  if (!resetArmed) { resetArmed = true; $('reset').textContent = 'Tap again to forget the saved addresses and redeploy'; setTimeout(() => { resetArmed = false; $('reset').textContent = 'Start over (forget saved addresses)'; }, 8000); return; }
+  resetArmed = false; $('reset').textContent = 'Start over (forget saved addresses)';
+  st = {}; save(); $('log').innerHTML = ''; log('Saved addresses forgotten: step 1 deploys a fresh set.'); refresh();
+};
 setInterval(() => refresh().catch(() => {}), 5000);
 </script>
 </body>
