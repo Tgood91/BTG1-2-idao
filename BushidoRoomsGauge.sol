@@ -14,11 +14,13 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @dev
 /// - Voting power is 1 WRune = 1 vote, read with `getPastVotes` at the second before the epoch starts. Moving or
 ///   re-delegating WRunes during an epoch cannot add weight to it. No virtue bonus (deferred to V2).
-/// - An invoker can vote again during the same epoch; the new split replaces the old one.
+/// - An invoker can vote again during the same epoch; the new split replaces the old one. An empty vote withdraws.
 /// - The owner (meant to be the BushidoGovernanceV1_1 timelock) adds rooms, switches them on/off and changes their
 ///   recipient. A room switched off mid-epoch keeps the weight already cast that epoch and can still claim it.
 /// - Rewards for an epoch can be claimed once that epoch has ended. If nobody voted in an epoch, its pot can be
 ///   rolled into the current epoch by anyone. Integer-division dust (under one wei per room per epoch) stays here.
+/// - Epochs can be funded at most MAX_FUND_AHEAD epochs ahead, so a wrong epoch number cannot lock funds for good.
+///   Reward tokens sent here without `fund` (a plain transfer) can be recovered by the owner; funded pots cannot.
 /// - The reward token must not take a fee on transfer (Runes does not); funding counts the amount actually received.
 contract BushidoRoomsGauge is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -35,6 +37,8 @@ contract BushidoRoomsGauge is Ownable, ReentrancyGuard {
     uint256 public constant MAX_BPS = 10_000;
     /// @notice Most rooms a single vote may split across (bounds gas for re-votes).
     uint256 public constant MAX_ROOMS_PER_VOTE = 16;
+    /// @notice How many epochs ahead of the current one a pot may be funded (about a year).
+    uint256 public constant MAX_FUND_AHEAD = 52;
 
     /// @notice The vote token: WRunes (timestamp clock).
     IVotes public immutable votesToken;
@@ -53,6 +57,8 @@ contract BushidoRoomsGauge is Ownable, ReentrancyGuard {
     mapping(uint256 => uint256) public epochReward;
     /// @notice epoch => room id => claimed already.
     mapping(uint256 => mapping(uint256 => bool)) public claimed;
+    /// @notice Reward tokens funded and not yet paid out (unclaimed shares, rounding dust and rolled-over pots).
+    uint256 public outstanding;
 
     /// @dev epoch => invoker => the rooms and weights of their current vote (to undo it on a re-vote).
     mapping(uint256 => mapping(address => uint256[])) internal _ballotRooms;
@@ -65,6 +71,7 @@ contract BushidoRoomsGauge is Ownable, ReentrancyGuard {
     event Funded(uint256 indexed epoch, address indexed from, uint256 amount);
     event Claimed(uint256 indexed epoch, uint256 indexed roomId, address indexed recipient, uint256 amount);
     event RolledOver(uint256 indexed fromEpoch, uint256 indexed toEpoch, uint256 amount);
+    event Recovered(address indexed to, uint256 amount);
 
     error InvalidContractAddress(address account);
     error ZeroAddress();
@@ -82,6 +89,7 @@ contract BushidoRoomsGauge is Ownable, ReentrancyGuard {
     error NothingToClaim(uint256 epoch, uint256 roomId);
     error EpochHadVotes(uint256 epoch);
     error ZeroAmount();
+    error EpochTooFarAhead(uint256 epoch, uint256 maxEpoch);
 
     /// @param _votesToken WRunes.
     /// @param _rewardToken Runes (or the token rewards are paid in).
@@ -151,19 +159,24 @@ contract BushidoRoomsGauge is Ownable, ReentrancyGuard {
         return votesToken.getPastVotes(invoker, snapshotOf(currentEpoch()));
     }
 
-    /// @notice Split your voting power for the current epoch across rooms. Replaces any earlier vote this epoch.
+    /// @notice Split your voting power for the current epoch across rooms. Replaces any earlier vote this epoch;
+    /// empty arrays withdraw it.
     /// @param roomIds Rooms to vote for, in strictly ascending order (no repeats).
     /// @param weightsBps Share of your power for each room, in basis points; together at most 10,000.
     function vote(uint256[] calldata roomIds, uint256[] calldata weightsBps) external {
         uint256 n = roomIds.length;
         if (n != weightsBps.length) revert LengthMismatch();
-        if (n == 0 || n > MAX_ROOMS_PER_VOTE) revert TooManyRooms();
+        if (n > MAX_ROOMS_PER_VOTE) revert TooManyRooms();
 
         uint256 epoch = currentEpoch();
+        _clearBallot(epoch, msg.sender);
+        if (n == 0) {
+            emit Voted(epoch, msg.sender, 0, roomIds, weightsBps); // vote withdrawn
+            return;
+        }
+
         uint256 power = votesToken.getPastVotes(msg.sender, snapshotOf(epoch));
         if (power == 0) revert NoVotingPower();
-
-        _clearBallot(epoch, msg.sender);
 
         uint256 sumBps;
         uint256 added;
@@ -213,11 +226,14 @@ contract BushidoRoomsGauge is Ownable, ReentrancyGuard {
     /// @notice Add `amount` of the reward token to an epoch's pot (the current one or a later one).
     function fund(uint256 epoch, uint256 amount) external nonReentrant {
         if (amount == 0) revert ZeroAmount();
-        if (epoch < currentEpoch()) revert EpochEnded(epoch);
+        uint256 cur = currentEpoch();
+        if (epoch < cur) revert EpochEnded(epoch);
+        if (epoch > cur + MAX_FUND_AHEAD) revert EpochTooFarAhead(epoch, cur + MAX_FUND_AHEAD);
         uint256 before = rewardToken.balanceOf(address(this));
         rewardToken.safeTransferFrom(msg.sender, address(this), amount);
         uint256 received = rewardToken.balanceOf(address(this)) - before;
         epochReward[epoch] += received;
+        outstanding += received;
         emit Funded(epoch, msg.sender, received);
     }
 
@@ -237,6 +253,7 @@ contract BushidoRoomsGauge is Ownable, ReentrancyGuard {
         amount = claimable(epoch, roomId);
         if (amount == 0) revert NothingToClaim(epoch, roomId);
         claimed[epoch][roomId] = true;
+        outstanding -= amount;
         rewardToken.safeTransfer(recipient, amount);
         emit Claimed(epoch, roomId, recipient, amount);
     }
@@ -251,5 +268,14 @@ contract BushidoRoomsGauge is Ownable, ReentrancyGuard {
         epochReward[epoch] = 0;
         epochReward[cur] += amount;
         emit RolledOver(epoch, cur, amount);
+    }
+
+    /// @notice Send reward tokens that no pot is owed (e.g. sent here by plain transfer) to `to`. Owner only.
+    function recoverUnowed(address to) external onlyOwner nonReentrant returns (uint256 amount) {
+        if (to == address(0)) revert ZeroAddress();
+        amount = rewardToken.balanceOf(address(this)) - outstanding;
+        if (amount == 0) revert ZeroAmount();
+        rewardToken.safeTransfer(to, amount);
+        emit Recovered(to, amount);
     }
 }

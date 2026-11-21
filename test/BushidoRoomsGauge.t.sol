@@ -160,8 +160,6 @@ contract BushidoRoomsGaugeTest is Test {
         vm.startPrank(alice);
         vm.expectRevert(BushidoRoomsGauge.LengthMismatch.selector);
         gauge.vote(_ids(0), _ids(1, 2));
-        vm.expectRevert(BushidoRoomsGauge.TooManyRooms.selector);
-        gauge.vote(new uint256[](0), new uint256[](0));
         vm.expectRevert(BushidoRoomsGauge.RoomsNotAscending.selector);
         gauge.vote(_ids(1, 1), _ids(1, 1));
         vm.expectRevert(BushidoRoomsGauge.RoomsNotAscending.selector);
@@ -185,6 +183,18 @@ contract BushidoRoomsGaugeTest is Test {
         vm.prank(alice);
         vm.expectRevert(BushidoRoomsGauge.TooManyRooms.selector);
         gauge.vote(many, many);
+    }
+
+    function test_EmptyVoteWithdraws() public {
+        _vote(alice, _ids(0, 1), _ids(5_000, 5_000));
+        _vote(alice, new uint256[](0), new uint256[](0));
+        assertEq(gauge.totalWeight(0), 0);
+        assertEq(gauge.roomWeight(0, 0), 0);
+        assertEq(gauge.roomWeight(0, 1), 0);
+        (uint256[] memory ids,) = gauge.ballotOf(0, alice);
+        assertEq(ids.length, 0);
+        // Withdrawing with no vote cast is a harmless no-op, even with no voting power.
+        _vote(makeAddr("nobody"), new uint256[](0), new uint256[](0));
     }
 
     function test_FreshEpochStartsEmpty() public {
@@ -254,6 +264,11 @@ contract BushidoRoomsGaugeTest is Test {
         gauge.fund(0, 0);
         gauge.fund(3, 50 ether); // a later epoch is fine
         assertEq(gauge.epochReward(3), 50 ether);
+        gauge.fund(52, 1 ether); // up to 52 epochs ahead
+        vm.expectRevert(abi.encodeWithSelector(BushidoRoomsGauge.EpochTooFarAhead.selector, 53, 52));
+        gauge.fund(53, 1 ether);
+        vm.expectRevert(abi.encodeWithSelector(BushidoRoomsGauge.EpochTooFarAhead.selector, 1_760_000_000, 52));
+        gauge.fund(1_760_000_000, 1 ether); // a timestamp passed by mistake
         vm.stopPrank();
         _nextEpoch();
         vm.prank(funder);
@@ -282,6 +297,34 @@ contract BushidoRoomsGaugeTest is Test {
         _nextEpoch();
         vm.expectRevert(abi.encodeWithSelector(BushidoRoomsGauge.EpochHadVotes.selector, 0));
         gauge.rollover(0);
+    }
+
+    function test_RecoverOnlyUnowedTokens() public {
+        vm.prank(funder);
+        gauge.fund(0, 100 ether);
+        vm.prank(funder);
+        runes.transfer(address(gauge), 7 ether); // sent without fund(): owed to no pot
+        assertEq(gauge.outstanding(), 100 ether);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
+        gauge.recoverUnowed(alice);
+
+        address treasury = makeAddr("treasury");
+        vm.prank(owner);
+        assertEq(gauge.recoverUnowed(treasury), 7 ether);
+        assertEq(runes.balanceOf(treasury), 7 ether);
+        assertEq(runes.balanceOf(address(gauge)), 100 ether); // the funded pot is untouched
+
+        vm.prank(owner);
+        vm.expectRevert(BushidoRoomsGauge.ZeroAmount.selector);
+        gauge.recoverUnowed(treasury);
+
+        // After claims, outstanding falls with the payouts and the pot still cannot be recovered.
+        _vote(alice, _ids(0), _ids(10_000));
+        _nextEpoch();
+        gauge.claim(0, 0);
+        assertEq(gauge.outstanding(), 0);
     }
 
     /// Re-votes never double count, and the rooms together can never be paid more than the pot.
@@ -314,6 +357,7 @@ contract BushidoRoomsGaugeTest is Test {
         assertLe(paid, pot);
         assertLe(pot - paid, 3); // only rounding dust remains
         assertEq(runes.balanceOf(address(gauge)), pot - paid);
+        assertEq(gauge.outstanding(), pot - paid); // dust stays owed, so recovery can never take a pot
     }
 
     function MAX_LEFT(uint16 used) internal pure returns (uint256) {

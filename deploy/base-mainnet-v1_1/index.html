@@ -38,8 +38,8 @@
     <div class="row"><span>Base ETH</span><span id="bal">—</span></div>
   </div>
   <div class="card">
-    <label for="wrunes">WRunes (WrappedRunesVotes) address. Leave empty to deploy a new WRunes.</label>
-    <input id="wrunes" placeholder="0x… or leave empty" autocomplete="off" spellcheck="false">
+    <label for="wrunes">WRunes (WrappedRunesVotes) address, required. A new, empty WRunes would let the first holder pass anything.</label>
+    <input id="wrunes" placeholder="0x…" autocomplete="off" spellcheck="false">
     <label for="threshold">Proposal threshold, in WRunes (0 = anyone may propose)</label>
     <input id="threshold" inputmode="decimal" value="0" autocomplete="off">
     <label for="timelock">Existing timelock (migration from V1). Leave empty to deploy a new 2-day timelock.</label>
@@ -104,7 +104,11 @@ async function run(label, fn) {
   if (busy) return; busy = true; show();
   try { await toBase(); if ((await fn()) !== 'waiting') log(`${label}: done`, 'ok'); }
   catch (e) { log(`${label} stopped: ${e.shortMessage || e.reason || e.message}`, 'bad'); }
-  finally { save(); busy = false; show(); $('bal').textContent = Number(ethers.formatEther(await read.getBalance(me))).toFixed(6); }
+  finally {
+    save(); busy = false; show();
+    // A failed balance read must not hide the step's own result or error.
+    try { $('bal').textContent = Number(ethers.formatEther(await read.getBalance(me))).toFixed(6); } catch {}
+  }
 }
 $('connect').onclick = async () => {
   if (!window.ethereum) return log('No wallet found. Open this page in the browser inside your wallet app.', 'bad');
@@ -134,7 +138,7 @@ $('b1').onclick = () => run('Deploy', async () => {
       const plan = c.timelock
         ? `Existing timelock: ${c.timelock} (V1 must pass the role changes afterwards)`
         : `New timelock, 2 day delay. Canceller: ${c.multisig || '<b>none</b> (no one can cancel a queued proposal)'}`;
-      $('confirmBox').innerHTML = `Deploy to <b>Base mainnet</b> from ${me}<br>WRunes: ${c.wrunes || 'deploy a new one'}<br>Proposal threshold: ${c.threshold} WRunes<br>${plan}<br>These are written into the contracts. Tap the button again to deploy.`;
+      $('confirmBox').innerHTML = `Deploy to <b>Base mainnet</b> from ${me}<br>WRunes: ${c.wrunes}<br>Proposal threshold: ${c.threshold} WRunes<br>${plan}<br>These are written into the contracts. Tap the button again to deploy.`;
       $('confirmBox').style.display = 'block';
       $('b1').textContent = 'Confirm: deploy to Base mainnet';
       log('Check the settings shown above the button, then tap "Confirm" to deploy.');

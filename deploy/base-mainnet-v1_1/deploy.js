@@ -2,7 +2,9 @@
 // script/DeployGovernanceV1_1.s.sol and script/DeployRoomsGauge.s.sol.
 // Used by index.html; the wallet only signs and sends, while gas, reads and confirmations go through Base's public RPC.
 //
-// New-timelock path (no timelock address entered): [WRunes if none entered] -> TimelockController (2 days, anyone
+// The WRunes address is required (as in the Foundry script): a freshly deployed WRunes has no supply, so its 4%
+// quorum would be 0 and the first wrapper could pass anything.
+// New-timelock path (no timelock address entered): TimelockController (2 days, anyone
 // executes, this wallet temporary admin) -> BushidoGovernanceV1_1 -> BushidoRoomsGauge (owner: timelock)
 // -> PROPOSER to the governor -> CANCELLER to the security multisig -> this wallet renounces timelock admin.
 // Existing-timelock path: deploys only the governor and the gauge, and shows the grantRole / revokeRole calls the V1 governance
@@ -49,6 +51,7 @@ async function checkWRunes(ethers, addr) {
   const W = new ethers.Contract(addr, WRUNES_ABI, READ);
   const [n, s, u, c, d] = await Promise.all([W.name(), W.symbol(), W.underlying(), W.CLOCK_MODE(), W.decimals()]).catch(() => { throw new Error('the WRunes address is not a WrappedRunesVotes contract'); });
   if (n !== 'Wrapped Runes' || s !== 'WRunes' || !eq(u, RUNES) || c !== 'mode=timestamp') throw new Error(`that token is ${n} / ${s} wrapping ${u} (${c}), not WRunes`);
+  if (d !== 18n) throw new Error(`WRunes reports ${d} decimals, expected 18`); // the threshold below is scaled by 18
   return Number(d);
 }
 
@@ -59,13 +62,14 @@ export async function preflight(ethers, me, raw) {
   if (eq(me, FAUCET_WALLET)) throw new Error('this is the faucet wallet: its key is on the server, so it must not own governance contracts. Connect another wallet.');
   if ((await READ.getCode(RUNES)) === '0x') throw new Error('Runes has no code on Base: wrong network?');
   const cfg = { wrunes: raw.wrunes, timelock: raw.timelock, multisig: raw.multisig, v1Governor: raw.v1Governor, threshold: raw.threshold || '0' };
+  if (!cfg.wrunes) throw new Error('enter the WRunes address (the existing WrappedRunesVotes on Base)');
   opt(ethers, cfg.wrunes, 'the WRunes address');
   opt(ethers, cfg.timelock, 'the timelock address');
   opt(ethers, cfg.multisig, 'the security multisig');
   opt(ethers, cfg.v1Governor, 'the V1 governor address');
-  if (cfg.wrunes) await checkWRunes(ethers, cfg.wrunes);
+  await checkWRunes(ethers, cfg.wrunes);
   if (!/^\d+(\.\d{1,18})?$/.test(cfg.threshold)) throw new Error('the proposal threshold must be a WRunes amount such as 0 or 1000');
-  cfg.thresholdWei = ethers.parseUnits(cfg.threshold, 18).toString(); // WRunes has Runes' 18 decimals
+  cfg.thresholdWei = ethers.parseUnits(cfg.threshold, 18).toString(); // checkWRunes confirmed 18 decimals
   if (cfg.timelock) {
     if ((await READ.getCode(cfg.timelock)) === '0x') throw new Error('the timelock address has no contract code on Base');
     await new ethers.Contract(cfg.timelock, TL_ABI, READ).getMinDelay().catch(() => { throw new Error('the timelock address is not a TimelockController'); });
@@ -80,10 +84,9 @@ export async function preflight(ethers, me, raw) {
 /** Step 1: deploy what is needed (each contract skipped if already deployed in this session). */
 export async function deploy(ethers, B, signer, st, cfg, log) {
   const me = await signer.getAddress();
-  if (cfg.wrunes) st.WrappedRunesVotes = cfg.wrunes;
+  st.WrappedRunesVotes = cfg.wrunes; // never deployed here: see the note at the top
   if (cfg.timelock) st.TimelockController = cfg.timelock;
   const args = {
-    WrappedRunesVotes: () => [],
     TimelockController: () => [NEW_TIMELOCK_DELAY, [], [ethers.ZeroAddress], me], // anyone executes; deployer admin until step 2
     BushidoGovernanceV1_1: () => [st.WrappedRunesVotes, st.TimelockController, BigInt(cfg.thresholdWei)],
     BushidoRoomsGauge: () => [st.WrappedRunesVotes, RUNES, st.TimelockController], // rooms are added by governance
