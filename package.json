@@ -1,0 +1,11 @@
+{
+  "name": "btg1-2-idao",
+  "private": true,
+  "scripts": {
+    "contracts:build": "forge build",
+    "contracts:test": "forge test"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.1.0"
+  }
+}
