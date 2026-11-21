@@ -46,11 +46,13 @@ contract BushidoGovernanceV1_1 is
         GovernorVotesQuorumFraction(INITIAL_QUORUM_PERCENT)
         GovernorTimelockControl(_timelock)
     {
+        // OpenZeppelin only stores the timelock address, so an EOA or address(0) would otherwise be accepted and
+        // leave a governor that can never queue or execute.
         if (address(_timelock).code.length == 0) revert InvalidContractAddress(address(_timelock));
     }
 
-    /// @dev Checked before GovernorVotes runs, because GovernorVotes calls `clock()` on the token in its
-    /// constructor: an EOA or zero address would otherwise fail there without our custom error.
+    /// @dev The token is checked before the parent constructors run: GovernorVotesQuorumFraction's constructor calls
+    /// clock() -> token().clock(), which reverts with no data on an EOA or address(0) instead of our custom error.
     function _checkedToken(IVotes token) private view returns (IVotes) {
         if (address(token).code.length == 0) revert InvalidContractAddress(address(token));
         return token;

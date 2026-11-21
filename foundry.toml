@@ -7,6 +7,8 @@ script = "script"
 out = "out"
 cache_path = "cache"
 libs = ["lib", "node_modules"]
+# src is the repo root, so keep the libraries and the testnet page out of the project sources.
+skip = ["lib/**", "node_modules/**"]
 solc_version = "0.8.24"
 auto_detect_solc = false
 evm_version = "cancun"
