@@ -1,14 +1,15 @@
-// Base mainnet deploy of BushidoGovernanceV1_1 (build/*.json), mirroring script/DeployGovernanceV1_1.s.sol.
+// Base mainnet deploy of BushidoGovernanceV1_1 and the BushidoRoomsGauge it owns (build/*.json), mirroring
+// script/DeployGovernanceV1_1.s.sol and script/DeployRoomsGauge.s.sol.
 // Used by index.html; the wallet only signs and sends, while gas, reads and confirmations go through Base's public RPC.
 //
 // New-timelock path (no timelock address entered): [WRunes if none entered] -> TimelockController (2 days, anyone
-// executes, this wallet temporary admin) -> BushidoGovernanceV1_1 -> PROPOSER to the governor -> CANCELLER to the
-// security multisig -> this wallet renounces timelock admin.
-// Existing-timelock path: deploys only the governor and shows the grantRole / revokeRole calls the V1 governance
+// executes, this wallet temporary admin) -> BushidoGovernanceV1_1 -> BushidoRoomsGauge (owner: timelock)
+// -> PROPOSER to the governor -> CANCELLER to the security multisig -> this wallet renounces timelock admin.
+// Existing-timelock path: deploys only the governor and the gauge, and shows the grantRole / revokeRole calls the V1 governance
 // must pass (target = the timelock); this wallet cannot change that timelock's roles.
 export const RUNES = '0x68E63f682AB383A9132317349125fF7618C96e01';
 export const FAUCET_WALLET = '0x4342bBb4FA142f2D5E7Fd02e7cFAc9FaF19B9BdE'; // holds a server key: must never own contracts
-export const NAMES = ['WrappedRunesVotes', 'TimelockController', 'BushidoGovernanceV1_1'];
+export const NAMES = ['WrappedRunesVotes', 'TimelockController', 'BushidoGovernanceV1_1', 'BushidoRoomsGauge'];
 export const NEW_TIMELOCK_DELAY = 2n * 24n * 3600n; // 2 days, as in the Foundry script
 const ADMIN = '0x0000000000000000000000000000000000000000000000000000000000000000'; // DEFAULT_ADMIN_ROLE
 const WRUNES_ABI = ['function name() view returns (string)', 'function symbol() view returns (string)', 'function underlying() view returns (address)', 'function CLOCK_MODE() view returns (string)', 'function decimals() view returns (uint8)'];
@@ -85,6 +86,7 @@ export async function deploy(ethers, B, signer, st, cfg, log) {
     WrappedRunesVotes: () => [],
     TimelockController: () => [NEW_TIMELOCK_DELAY, [], [ethers.ZeroAddress], me], // anyone executes; deployer admin until step 2
     BushidoGovernanceV1_1: () => [st.WrappedRunesVotes, st.TimelockController, BigInt(cfg.thresholdWei)],
+    BushidoRoomsGauge: () => [st.WrappedRunesVotes, RUNES, st.TimelockController], // rooms are added by governance
   };
   for (const name of NAMES) {
     if (st[name]) { log(`${name} at ${st[name]}`); continue; }
@@ -139,6 +141,9 @@ export async function verify(ethers, B, st, cfg, me) {
   add('Governor', name === 'BushidoGovernance V1.1' && eq(tok, st.WrappedRunesVotes) && eq(tl, st.TimelockController), `"${name}", token and timelock match`);
   const [d, p, q, th] = await Promise.all([G.votingDelay(), G.votingPeriod(), G.quorumNumerator(), G.proposalThreshold()]);
   add('Settings', d === 86400n && p === 604800n && q === 4n && th === BigInt(cfg.thresholdWei), `delay ${d} s, voting ${p} s, quorum ${q}%, threshold ${ethers.formatUnits(th, 18)} WRunes`);
+  const Gg = new ethers.Contract(st.BushidoRoomsGauge, B.BushidoRoomsGauge.abi, READ);
+  const [gv, gr, go, ge] = await Promise.all([Gg.votesToken(), Gg.rewardToken(), Gg.owner(), Gg.EPOCH_LENGTH()]);
+  add('Rooms gauge', eq(gv, st.WrappedRunesVotes) && eq(gr, RUNES) && eq(go, st.TimelockController) && ge === 604800n, `votes with WRunes, pays Runes, owned by the timelock, ${ge} s epochs`);
   const delay = await T.getMinDelay();
   if (cfg.timelock) {
     const isProposer = await T.hasRole(R.PROPOSER, st.BushidoGovernanceV1_1);

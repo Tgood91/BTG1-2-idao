@@ -27,9 +27,11 @@
 <body>
 <main>
   <h1>BTG governance V1.1 · Base mainnet deploy</h1>
-  <div class="sub">Deploys BushidoGovernanceV1_1: one WRune, one vote (no virtue bonus), 1 day delay, 7 days voting, 4% quorum.
+  <div class="sub">Deploys BushidoGovernanceV1_1 (one WRune, one vote, no virtue bonus; 1 day delay, 7 days voting, 4% quorum)
+    and the rooms gauge it owns: each week WRunes holders split their votes across rooms, and a Runes reward pot is
+    shared between rooms by the weight they got. Rooms are added later by governance proposals.
     With no timelock address it also deploys a new timelock (2 day delay) and hands its admin role away from this wallet.
-    About 4–6 confirmations; costs well under $1 of ETH at normal Base gas prices.</div>
+    About 5–7 confirmations; costs well under $1 of ETH at normal Base gas prices.</div>
   <div class="card">
     <button id="connect">Connect wallet</button>
     <div class="row"><span>Wallet</span><span id="who">not connected</span></div>
@@ -80,7 +82,7 @@ function log(m, cls) { const d = document.createElement('div'); if (cls) d.class
 function show() {
   const rows = D.NAMES.filter((n) => st[n]).map((n) => `<div class="row"><span>${n}</span><a target="_blank" rel="noopener" href="${CHAIN.explorer}/address/${st[n]}">${st[n]}</a></div>`);
   $('addrs').innerHTML = rows.join('') || 'Nothing deployed yet.';
-  const done = !!st.BushidoGovernanceV1_1, existing = !!(st.cfg && st.cfg.timelock);
+  const done = D.NAMES.every((n) => st[n]), existing = !!(st.cfg && st.cfg.timelock);
   $('b1').disabled = busy || !me || done;
   $('b2').disabled = busy || !done || existing || st.wired;
   $('b3').disabled = busy || !done;
