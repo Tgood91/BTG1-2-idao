@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repoint Agent 1219431</title>
+<style>
+  :root { --bg:#0b0b10; --card:#15151d; --text:#e8e8ef; --muted:#9a9aab; --accent:#7c6cff; --ok:#4ade80; --warn:#fcd34d; --bad:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:4px 0 2px; } .sub { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .card { background:var(--card); border:1px solid #262633; border-radius:12px; padding:14px; margin-bottom:12px; }
+  button { width:100%; min-height:44px; margin:6px 0; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; font-size:15px; }
+  button:disabled { background:#2b2b38; color:#77778a; }
+  .row { display:flex; justify-content:space-between; gap:8px; font-size:13px; color:var(--muted); overflow-wrap:anywhere; }
+  .row > span:first-child { flex:none; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+  #log { font:12px/1.5 ui-monospace, Menlo, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+  a { color:#8ab4ff; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Agent 1219431: point it at agent-registration.json</h1>
+  <div class="sub">One transaction on Base: the ERC-8004 Identity Registry's <code>setAgentURI</code> points your live agent 1219431
+    at <code>/.well-known/agent-registration.json</code>, so <code>/.well-known/agent-card.json</code> can become its A2A card.
+    Both URLs serve the same registration file today, so nothing breaks in between. Only the agent's owner can send it.</div>
+  <div class="card">
+    <button id="connect">Connect wallet</button>
+    <div class="row"><span>Wallet</span><span id="who">not connected</span></div>
+    <div class="row"><span>Owner of 1219431</span><span id="owner">—</span></div>
+    <div class="row"><span>Its URI now</span><span id="uri">—</span></div>
+  </div>
+  <div class="card">
+    <div id="confirmBox" class="warn" style="display:none"></div>
+    <button id="send" disabled>Point 1219431 at agent-registration.json</button>
+  </div>
+  <div class="card"><div id="log"></div></div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<script>
+const { ethers } = window;
+const REGISTRY = '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432';
+const AGENT = 1219431n;
+const NEW_URI = 'https://bushido-dapp.onrender.com/.well-known/agent-registration.json';
+const ABI = ['function ownerOf(uint256) view returns (address)', 'function tokenURI(uint256) view returns (string)', 'function setAgentURI(uint256 agentId, string newURI)'];
+const read = new ethers.JsonRpcProvider('https://mainnet.base.org', 8453, { staticNetwork: true }); // reads never depend on the wallet
+const R = new ethers.Contract(REGISTRY, ABI, read);
+const $ = (id) => document.getElementById(id);
+let signer, me, owner, armed = false, busy = false;
+const log = (m, cls) => { const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = `${new Date().toLocaleTimeString()}  ${m}`; $('log').prepend(d); };
+async function refresh() {
+  owner = await R.ownerOf(AGENT);
+  const uri = await R.tokenURI(AGENT);
+  $('owner').textContent = owner; $('uri').textContent = uri;
+  const done = uri === NEW_URI;
+  if (done) { $('send').disabled = true; $('send').textContent = 'Done: 1219431 points at agent-registration.json'; $('confirmBox').style.display = 'none'; return; }
+  $('send').disabled = busy || !me || me.toLowerCase() !== owner.toLowerCase();
+}
+$('connect').onclick = async () => {
+  if (!window.ethereum) return log('No wallet found. Open this page in the browser inside your wallet app.', 'bad');
+  try {
+    await window.ethereum.request({ method: 'eth_requestAccounts' });
+    if (parseInt(await window.ethereum.request({ method: 'eth_chainId' }), 16) !== 8453) await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x2105' }] });
+    signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+    me = await signer.getAddress(); $('who').textContent = me; $('connect').textContent = 'Connected';
+    await refresh();
+    if (me.toLowerCase() !== owner.toLowerCase()) log('This wallet is not the owner of agent 1219431. Connect the owner wallet.', 'bad');
+    else log('Owner wallet connected on Base.');
+  } catch (e) { log('Connect failed: ' + (e.shortMessage || e.message), 'bad'); }
+};
+$('send').onclick = async () => {
+  if (busy) return;
+  if (!armed) { // two taps on the page: some wallet browsers block confirm() pop-ups
+    armed = true;
+    $('confirmBox').innerHTML = `Registry: ${REGISTRY}<br>setAgentURI(1219431, "${NEW_URI}")<br>Tap the button again to sign.`;
+    $('confirmBox').style.display = 'block'; $('send').textContent = 'Confirm: sign on Base'; return;
+  }
+  busy = true; $('send').disabled = true;
+  try {
+    if (parseInt(await window.ethereum.request({ method: 'eth_chainId' }), 16) !== 8453) throw new Error('the wallet is not on Base');
+    const data = R.interface.encodeFunctionData('setAgentURI', [AGENT, NEW_URI]);
+    const gas = await read.estimateGas({ from: me, to: REGISTRY, data }); // a revert stops here, before anything is signed
+    const fee = await read.getFeeData();
+    const tx = { from: me, to: REGISTRY, data, gasLimit: (gas * 12n) / 10n + 10000n };
+    if (fee.maxFeePerGas) Object.assign(tx, { maxFeePerGas: fee.maxFeePerGas * 2n, maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? 1n });
+    log('Simulation passed. Confirm it in your wallet…');
+    const hash = await signer.sendUncheckedTransaction(tx);
+    log('Sent ' + hash + ', waiting for Base…');
+    let rc = null;
+    for (let i = 0; i < 90 && !rc; i++) { rc = await read.getTransactionReceipt(hash).catch(() => null); if (!rc) await new Promise((r) => setTimeout(r, 2000)); }
+    if (!rc) throw new Error('not confirmed after 3 minutes; check your wallet activity');
+    if (rc.status !== 1) throw new Error('reverted on-chain');
+    const a = document.createElement('a'); a.href = 'https://basescan.org/tx/' + hash; a.target = '_blank'; a.textContent = 'View on Basescan';
+    log('Confirmed. 1219431 now points at agent-registration.json.', 'ok'); $('log').prepend(a);
+  } catch (e) { log('Stopped: ' + (e.shortMessage || e.reason || e.message), 'bad'); armed = false; $('send').textContent = 'Point 1219431 at agent-registration.json'; $('confirmBox').style.display = 'none'; }
+  finally { busy = false; await refresh().catch(() => {}); }
+};
+refresh().catch((e) => log('Could not read the registry: ' + (e.shortMessage || e.message), 'bad'));
+</script>
+</body>
+</html>
